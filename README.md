@@ -2,7 +2,7 @@
 
 FastAPIとReactに基づいたフルスタックユーザー認証システムで、ユーザー登録、ログイン、およびJWTトークン認証機能を実装しています。
 
-体験ページ：[デモサイト](https://www.google.com/search?q=https://japanesetalk.org/login "null")
+体験ページ：[デモサイト](https://japanesetalk.org/login)
 
 ## 1. 環境要件
 
