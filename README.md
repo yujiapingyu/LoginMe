@@ -255,22 +255,6 @@ RefreshToken テーブル:
         
     - エラー: 401 - 未認証（Unauthorized）
         
-2. **POST /api/login**
-    
-    - リクエストボディ: `{ "email": "user@example.com", "password": "password123" }`
-        
-    - レスポンス: `{ "access_token": "eyJ...", "token_type": "bearer" }`
-        
-    - エラー: 400 - ユーザーが存在しないか、パスワードが間違っています
-        
-3. **GET /api/users/me**
-    
-    - リクエストヘッダー: `Authorization: Bearer <token>`
-        
-    - レスポンス: `{ "id": 1, "email": "user@example.com" }`
-        
-    - エラー: 401 - 未認証（Unauthorized）
-        
 
 #### セキュリティメカニズム
 
