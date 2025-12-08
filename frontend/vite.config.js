@@ -14,9 +14,14 @@ export default defineConfig(({ mode }) => {
       port: parseInt(env.VITE_PORT) || 5173,
       
       // 2. 监听所有网络接口（服务器部署必需）
-      host: '0.0.0.0',
+      host: env.VITE_HOST || '0.0.0.0',
       
-      // 3. 代理配置
+      // 3. 允许的主机名（解决 Vite 的 Host header 检查）
+      allowedHosts: env.VITE_ALLOWED_HOSTS 
+        ? env.VITE_ALLOWED_HOSTS.split(',').map(h => h.trim())
+        : ['localhost', '127.0.0.1'],
+      
+      // 4. 代理配置
       proxy: {
         '/api': {
           target: env.VITE_API_TARGET || 'http://127.0.0.1:8000',
