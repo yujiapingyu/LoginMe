@@ -162,6 +162,7 @@ def read_users_me(current_user: models.User = Depends(get_current_user)):
 if __name__ == "__main__":
     import uvicorn
     
+    host = os.getenv("APP_HOST", "0.0.0.0")  # 默认监听所有网络接口
     port = int(os.getenv("APP_PORT", 8000))
-    print(f"🚀 Starting server on port {port}...")
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    print(f"🚀 Starting server on {host}:{port}...")
+    uvicorn.run("main:app", host=host, port=port, reload=True)
