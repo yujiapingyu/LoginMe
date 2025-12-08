@@ -158,3 +158,10 @@ def read_users_me(current_user: models.User = Depends(get_current_user)):
     Returns the current user's information.
     """
     return current_user
+
+if __name__ == "__main__":
+    import uvicorn
+    
+    port = int(os.getenv("APP_PORT", 8000))
+    print(f"🚀 Starting server on port {port}...")
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)

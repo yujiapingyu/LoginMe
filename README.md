@@ -5,8 +5,8 @@
 ## 一、环境要件
 
 ### 后端环境
-- **Python**: 3.8 或更高版本
-- **数据库**: SQLite（开发环境）
+- **Python**: 3.12 或更高版本
+- **数据库**: SQLite
 - **主要依赖**:
   - FastAPI 0.124.0
   - SQLAlchemy 2.0.44
@@ -15,8 +15,8 @@
   - uvicorn 0.38.0（ASGI服务器）
 
 ### 前端环境
-- **Node.js**: 16.x 或更高版本
-- **包管理器**: npm 或 yarn
+- **Node.js**: 25.1.0 或更高版本
+- **包管理器**: npm
 - **主要依赖**:
   - React 19.2.0
   - React Router DOM 7.10.1
@@ -31,13 +31,17 @@
 # 进入后端目录
 cd backend
 
-# 创建虚拟环境（推荐）
-python3 -m venv venv
-source venv/bin/activate  # macOS/Linux
+# 创建虚拟环境
+python3 -m venv .venv
+source .venv/bin/activate  # macOS/Linux
 # 或 venv\Scripts\activate  # Windows
 
 # 安装依赖
 pip install -r requirements.txt
+
+# 复制env
+cp .env.template .env
+# 复制后按照自己需求修改env中的环境变量
 
 # 启动后端服务（开发模式，自动重载）
 uvicorn main:app --reload
@@ -54,6 +58,10 @@ cd frontend
 
 # 安装依赖
 npm install
+
+# 复制env
+cp .env.template .env
+# 复制后按照自己需求修改env中的环境变量
 
 # 启动开发服务器
 npm run dev
@@ -79,7 +87,6 @@ npm run dev
   - JWT令牌生成和验证逻辑（`create_access_token`、`get_current_user`函数）
   - 密码加密和验证机制（使用bcrypt）
   - 数据库模型和Pydantic schema定义
-  - FastAPI依赖注入模式实现
 
 - **前端**:
   - React Router配置和路由保护逻辑
@@ -186,38 +193,3 @@ User 表:
 - 使用localStorage存储JWT令牌
 - 通过axios拦截器自动在请求头中添加认证令牌
 - 401错误时自动跳转到登录页
-
-#### API客户端封装
-```javascript
-// 统一的API基础URL配置
-// 自动附加Authorization头
-// 统一错误处理
-```
-
-### 项目特点
-
-1. **前后端分离**: 清晰的前后端职责划分，便于独立开发和部署
-2. **RESTful API**: 遵循REST架构风格，API设计清晰规范
-3. **JWT认证**: 无状态认证机制，易于扩展和负载均衡
-4. **类型安全**: 后端使用Pydantic进行数据验证，前端使用TypeScript类型提示
-5. **开发友好**: 
-   - 后端自动重载（uvicorn --reload）
-   - 前端热模块替换（Vite HMR）
-   - 自动生成的API文档（FastAPI Swagger UI）
-
-### 未来改进方向
-
-- [ ] 添加邮箱验证功能
-- [ ] 实现密码重置功能
-- [ ] 添加刷新令牌（Refresh Token）机制
-- [ ] 实现用户权限和角色管理
-- [ ] 添加单元测试和集成测试
-- [ ] 部署到生产环境（Docker + PostgreSQL）
-- [ ] 添加速率限制防止暴力破解
-- [ ] 实现OAuth第三方登录（Google、GitHub等）
-
----
-
-**作者**: David Fish  
-**日期**: 2025年12月8日  
-**版本**: 1.0.0
