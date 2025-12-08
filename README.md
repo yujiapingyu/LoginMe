@@ -198,7 +198,7 @@ User テーブル:
 |`/api/users/me`|GET|現在のユーザー情報を取得|要（JWT）|
 
 **詳細インターフェース説明:**
-
+![alt text](images/logic.png)
 1. **POST /api/register**
     
     - リクエストボディ: `{ "email": "user@example.com", "password": "password123" }`
