@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { login } from '../api/auth';
-import { TOKEN_KEY } from '../api/client';
+import { setAccessToken } from '../api/client';
 
 function LoginPage() {
   const [email, setEmail] = useState('');
@@ -17,11 +17,11 @@ function LoginPage() {
       // 1. Call the login interface
       const data = await login(email, password);
       
-      // 2. Core step: Save Token to LocalStorage
-      // The backend returns data in the structure { access_token: "...", token_type: "bearer" }
-      localStorage.setItem(TOKEN_KEY, data.access_token);
+      // 2. Store access token in memory (not localStorage for better security)
+      // Refresh token is automatically stored in HttpOnly cookie by backend
+      setAccessToken(data.access_token);
       
-      // 3. Redirect to home page (personal center)
+      // 3. Redirect to home page
       navigate('/'); 
       
     } catch (err) {

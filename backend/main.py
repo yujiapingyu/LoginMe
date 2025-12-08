@@ -1,9 +1,11 @@
 import os
+import secrets
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Response, Request
 from fastapi.security import OAuth2PasswordBearer
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from jose import JWTError, jwt
@@ -20,13 +22,31 @@ load_dotenv()  # Load environment variables from .env file
 # For this assignment, we keep them hardcoded for simplicity.
 SECRET_KEY = os.getenv("SECRET_KEY", "supert_secret_key_for_interview_assignment") 
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 15))  # Shorter for access token
+REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))  # Longer for refresh token
+CORS_ORIGINS = os.getenv(
+    "CORS_ORIGINS", 
+    "http://localhost:5173,http://127.0.0.1:5173"
+).split(",")  # Convert comma-separated string to list
+
 print(f"Using ACCESS_TOKEN_EXPIRE_MINUTES: {ACCESS_TOKEN_EXPIRE_MINUTES}")
+print(f"Using REFRESH_TOKEN_EXPIRE_DAYS: {REFRESH_TOKEN_EXPIRE_DAYS}")
+print(f"CORS allowed origins: {CORS_ORIGINS}")
+
 # --- Initialization ---
 # Create database tables automatically if they don't exist
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Login System Assignment")
+
+# Add CORS middleware for cookie support
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,  # Load from environment variable
+    allow_credentials=True,  # Allow cookies
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Password hashing context (using bcrypt)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -48,7 +68,7 @@ def get_password_hash(password):
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     """
-    Generates a JWT token.
+    Generates a JWT access token.
     Encodes the user identifier (sub) and expiration time (exp) into a string.
     """
     to_encode = data.copy()
@@ -63,6 +83,28 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     # Encode the JWT
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+def create_refresh_token(user_id: int, db: Session):
+    """
+    Generates a refresh token and stores it in the database.
+    Returns the token string.
+    """
+    # Generate a secure random token
+    token = secrets.token_urlsafe(32)
+    
+    # Calculate expiration time
+    expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    
+    # Store in database
+    db_refresh_token = models.RefreshToken(
+        user_id=user_id,
+        token=token,
+        expires_at=expires_at
+    )
+    db.add(db_refresh_token)
+    db.commit()
+    
+    return token
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     """
@@ -126,12 +168,16 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
     
     return new_user
 
-@app.post("/api/login")
-def login(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
+@app.post("/api/login", response_model=schemas.TokenResponse)
+def login(
+    response: Response,
+    user_data: schemas.UserCreate, 
+    db: Session = Depends(get_db)
+):
     """
     User Login Endpoint.[登录接口]
     1. Validates the email and password.
-    2. Returns a JWT access token if valid.
+    2. Returns a JWT access token and sets refresh token in HttpOnly cookie.
     """
     # Find user by email
     user = db.query(models.User).filter(models.User.email == user_data.email).first()
@@ -142,13 +188,115 @@ def login(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
     if not verify_password(user_data.password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Incorrect password")
     
-    # Generate token
+    # Generate short-lived access token (15 minutes)
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.email}, expires_delta=access_token_expires
     )
     
+    # Generate long-lived refresh token (7 days) and store in database
+    refresh_token = create_refresh_token(user.id, db)
+    
+    # Set refresh token as HttpOnly cookie
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,       # Prevents JavaScript access (XSS protection)
+        secure=False,        # Set to True in production with HTTPS
+        samesite="lax",      # CSRF protection
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,  # 7 days in seconds
+        path="/api"          # Only send cookie for API routes
+    )
+    
     return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/api/refresh", response_model=schemas.TokenResponse)
+def refresh_access_token(request: Request, response: Response, db: Session = Depends(get_db)):
+    """
+    Refresh Token Endpoint.[刷新令牌接口]
+    Reads refresh token from HttpOnly cookie and returns a new access token.
+    """
+    # Get refresh token from cookie
+    refresh_token = request.cookies.get("refresh_token")
+    
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No refresh token provided"
+        )
+    
+    # Verify refresh token exists in database and is not expired
+    db_refresh_token = db.query(models.RefreshToken).filter(
+        models.RefreshToken.token == refresh_token
+    ).first()
+    
+    if not db_refresh_token:
+        response.delete_cookie("refresh_token", path="/api")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+    
+    # Check if token is expired
+    # Ensure both datetimes have timezone info for comparison
+    now = datetime.now(timezone.utc)
+    token_expires_at = db_refresh_token.expires_at
+    
+    # If the stored datetime is naive, make it aware (assume it's UTC)
+    if token_expires_at.tzinfo is None:
+        token_expires_at = token_expires_at.replace(tzinfo=timezone.utc)
+    
+    if now > token_expires_at:
+        # Delete expired token from database
+        db.delete(db_refresh_token)
+        db.commit()
+        response.delete_cookie("refresh_token", path="/api")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token expired"
+        )
+    
+    # Get user associated with this refresh token
+    user = db.query(models.User).filter(models.User.id == db_refresh_token.user_id).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found"
+        )
+    
+    # Generate new access token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    new_access_token = create_access_token(
+        data={"sub": user.email},
+        expires_delta=access_token_expires
+    )
+    
+    return {"access_token": new_access_token, "token_type": "bearer"}
+
+@app.post("/api/logout")
+def logout(request: Request, response: Response, db: Session = Depends(get_db)):
+    """
+    Logout Endpoint.[登出接口]
+    Deletes refresh token from database and clears cookie.
+    """
+    # Get refresh token from cookie
+    refresh_token = request.cookies.get("refresh_token")
+    
+    if refresh_token:
+        # Delete refresh token from database
+        db_refresh_token = db.query(models.RefreshToken).filter(
+            models.RefreshToken.token == refresh_token
+        ).first()
+        
+        if db_refresh_token:
+            db.delete(db_refresh_token)
+            db.commit()
+    
+    # Clear refresh token cookie
+    response.delete_cookie("refresh_token", path="/api")
+    
+    return {"message": "Logged out successfully"}
 
 @app.get("/api/users/me", response_model=schemas.UserOut)
 def read_users_me(current_user: models.User = Depends(get_current_user)):

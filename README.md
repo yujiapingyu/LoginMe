@@ -158,11 +158,17 @@ npm run dev
 
 2. ユーザーログインフロー:
    ユーザーがフォーム入力 → フロントエンド検証 → POST /api/login → バックエンドでメールアドレスとパスワードを検証
-   → JWTトークン生成 → access_tokenを返す → フロントエンドでトークンを保存
+   → 双トークン生成（Access Token + Refresh Token） → access_tokenを返す + refresh_tokenをHttpOnly Cookieに設定
+   → フロントエンドでaccess_tokenを内存に保存
 
 3. 保護されたリソースへのアクセス:
    フロントエンドからのリクエスト → JWTトークンを付与（Authorization: Bearer <token>）
    → バックエンドでトークン検証 → ユーザーデータまたは401エラーを返す
+
+4. ページ刷新時の自動トークン更新:
+   ページ刷新 → Access Token消失（内存クリア） → API呼び出し時401エラー
+   → 拦截器が自動的にRefresh Token（Cookie）でAccess Tokenを更新
+   → 新しいAccess Tokenで元のリクエストを再試行 → 成功
 ```
 
 ### バックエンド設計
@@ -187,6 +193,13 @@ User テーブル:
 - id: Integer (主キー)
 - email: String (ユニーク, インデックス)
 - hashed_password: String (BCrypt暗号化済み)
+
+RefreshToken テーブル:
+- id: Integer (主キー)
+- user_id: Integer (外部キー → User.id)
+- token: String (ユニーク, インデックス)
+- expires_at: DateTime (有効期限)
+- created_at: DateTime (作成日時)
 ```
 
 #### APIインターフェース設計
@@ -195,17 +208,52 @@ User テーブル:
 |---|---|---|---|
 |`/api/register`|POST|ユーザー登録|否|
 |`/api/login`|POST|ユーザーログイン|否|
+|`/api/refresh`|POST|Access Token更新|要（Refresh Token Cookie）|
+|`/api/logout`|POST|ログアウト|否|
 |`/api/users/me`|GET|現在のユーザー情報を取得|要（JWT）|
 
 **詳細インターフェース説明:**
-![alt text](images/logic.png)
 1. **POST /api/register**
     
-    - リクエストボディ: `{ "email": "user@example.com", "password": "password123" }`
+    - リクエストボディ: `{ "email": "user@example.com", "password": "password123" }`
         
-    - レスポンス: `{ "id": 1, "email": "user@example.com" }`
+    - レスポンス: `{ "id": 1, "email": "user@example.com" }`
         
     - エラー: 400 - メールアドレス登録済み
+        
+2. **POST /api/login**
+    
+    - リクエストボディ: `{ "email": "user@example.com", "password": "password123" }`
+        
+    - レスポンス: `{ "access_token": "eyJ...", "token_type": "bearer" }`
+        
+    - Cookie設定: `refresh_token` (HttpOnly, 7日間有効)
+        
+    - エラー: 400 - ユーザーが存在しないか、パスワードが間違っています
+
+3. **POST /api/refresh**
+    
+    - Cookie: `refresh_token` (自動送信)
+        
+    - レスポンス: `{ "access_token": "eyJ...", "token_type": "bearer" }`
+        
+    - エラー: 401 - Refresh Token無効または期限切れ
+
+4. **POST /api/logout**
+    
+    - Cookie: `refresh_token` (自動送信)
+        
+    - レスポンス: `{ "message": "Logged out successfully" }`
+        
+    - 処理: データベースからRefresh Tokenを削除、Cookieをクリア
+        
+5. **GET /api/users/me**
+    
+    - リクエストヘッダー: `Authorization: Bearer <token>`
+        
+    - レスポンス: `{ "id": 1, "email": "user@example.com" }`
+        
+    - エラー: 401 - 未認証（Unauthorized）
         
 2. **POST /api/login**
     
@@ -217,9 +265,9 @@ User テーブル:
         
 3. **GET /api/users/me**
     
-    - リクエストヘッダー: `Authorization: Bearer <token>`
+    - リクエストヘッダー: `Authorization: Bearer <token>`
         
-    - レスポンス: `{ "id": 1, "email": "user@example.com" }`
+    - レスポンス: `{ "id": 1, "email": "user@example.com" }`
         
     - エラー: 401 - 未認証（Unauthorized）
         
@@ -228,11 +276,19 @@ User テーブル:
 
 - **パスワードの安全性**: Bcryptアルゴリズムを使用してパスワードをハッシュ化し、平文のパスワードは決して保存しません
     
-- **トークンの有効期限**: JWTトークンはデフォルトで30分で期限切れとなります（環境変数で設定可能）
+- **双トークンメカニズム**: 
+    - **Access Token**: 短期有効（15分）、内存に保存、XSS攻撃から保護
+    - **Refresh Token**: 長期有効（7日）、HttpOnly Cookieに保存、JavaScriptからアクセス不可
     
 - **トークン検証**: 保護されたリソースへのリクエストごとに、トークンの署名と有効期限を検証します
     
+- **自動トークン更新**: Access Token期限切れ時、Refresh Tokenを使用して自動的に新しいAccess Tokenを取得
+    
+- **トークン撤回**: Refresh Tokenをデータベースに保存し、ログアウト時に削除することで即座に撤回可能
+    
 - **依存性の注入**: FastAPIの依存性注入システムを使用して認証ガードを実装しています
+    
+- **CORS設定**: 環境変数で許可するオリジンを設定、クロスオリジンリクエストを制御
     
 
 ### フロントエンド設計
@@ -265,10 +321,14 @@ User テーブル:
 - **HomePage**: 保護されたホームページ、ユーザー情報を表示
     
 
-#### 状態管理
+#### 状態管理とトークン保存
 
-- `localStorage`を使用してJWTトークンを保存
+- **Access Token**: 内存に保存、XSS攻撃から最大限に保護
     
-- `axios`インターセプターにより、リクエストヘッダーに認証トークンを自動的に追加
+- **Refresh Token**: HttpOnly Cookieに保存、JavaScriptからアクセス不可、XSSから完全に保護
     
-- 401エラー発生時に自動的にログインページへリダイレクト
+- **自動トークン更新**: Axiosインターセプターで401エラーを捕捉し、Refresh Tokenで自動的にAccess Tokenを更新
+    
+- **競合状態の処理**: 複数のリクエストが同時に401を受け取った場合、一度だけRefresh Tokenを実行し、他のリクエストはキューで待機
+    
+- **ユーザー情報**: React Stateで管理、ページ刷新時は自動的にAPI経由で再取得
