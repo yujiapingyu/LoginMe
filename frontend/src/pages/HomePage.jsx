@@ -73,6 +73,12 @@ function HomePage() {
         <p style={{margin: '5px 0', fontSize: '12px', color: '#666'}}>
           💡 Refresh the page (F5) to see auto-refresh in action!
         </p>
+        <p style={{margin: '5px 0', fontSize: '12px', color: '#666'}}>
+          press F12, in network tab, you can see:
+          <p>1. /api/users/me FAIL</p>
+          <p>2. /api/refresh SUCCESS</p>
+          <p>3. /api/users/me SUCCESS</p>
+        </p>
       </div>
       
       <div style={styles.card}>
