@@ -215,6 +215,7 @@ def refresh_access_token(request: Request, response: Response, db: Session = Dep
     """
     Refresh Token Endpoint.[刷新令牌接口]
     Reads refresh token from HttpOnly cookie and returns a new access token.
+    Implements refresh [token rotation] for enhanced security.
     """
     # Get refresh token from cookie
     refresh_token = request.cookies.get("refresh_token")
