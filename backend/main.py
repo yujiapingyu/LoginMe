@@ -272,6 +272,27 @@ def refresh_access_token(request: Request, response: Response, db: Session = Dep
         expires_delta=access_token_expires
     )
     
+    # Refresh Token Rotation: Generate new refresh token
+    # Delete old refresh token from database
+    db.delete(db_refresh_token)
+    
+    # Create new refresh token
+    new_refresh_token = create_refresh_token(user.id, db)
+    
+    # Commit the deletion and new token creation
+    db.commit()
+    
+    # Set new refresh token as HttpOnly cookie
+    response.set_cookie(
+        key="refresh_token",
+        value=new_refresh_token,
+        httponly=True,
+        secure=False,        # Set to True in production with HTTPS
+        samesite="lax",
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/api"
+    )
+    
     return {"access_token": new_access_token, "token_type": "bearer"}
 
 @app.post("/api/logout")
